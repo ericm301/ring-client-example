@@ -3,38 +3,60 @@ import { RingApi } from "ring-client-api";
 import { readFile, writeFile } from "fs";
 import { promisify } from "util";
 
-async function example() {
+async function getRing() {
   const { env } = process,
-    ringApi = new RingApi({
-      // This value comes from the .env file
-      refreshToken: env.RING_REFRESH_TOKEN!,
-      debug: true,
-    }),
-    locations = await ringApi.getLocations(),
-    allCameras = await ringApi.getCameras();
+        ringApi = new RingApi({
+          refreshToken: env.RING_REFRESH_TOKEN!,
+          debug: true
+        });
+
+  const sub = ringApi.onRefreshTokenUpdated.subscribe(
+    async ({newRefreshToken, oldRefreshToken}) => {
+      console.log('Token refreshed!');
+
+      if (!oldRefreshToken) { return; }
+
+      const currentConfig = await promisify(readFile)('.env'),
+            updatedConfig = currentConfig
+              .toString()
+              .replace(oldRefreshToken, newRefreshToken);
+      
+      await promisify(writeFile)('.env', updatedConfig)
+    }
+  )
+  
+
+  return { ringApi, sub };
+
+}
+
+async function example() {
+  const { ringApi, sub } = await getRing(),
+               locations = await ringApi.getLocations(),
+              allCameras = await ringApi.getCameras();
 
   console.log(
     `Found ${locations.length} location(s) with ${allCameras.length} camera(s).`
   );
 
-  ringApi.onRefreshTokenUpdated.subscribe(
-    async ({ newRefreshToken, oldRefreshToken }) => {
-      console.log("Refresh Token Updated: ", newRefreshToken);
+  // ringApi.onRefreshTokenUpdated.subscribe(
+  //   async ({ newRefreshToken, oldRefreshToken }) => {
+  //     console.log("Refresh Token Updated: ", newRefreshToken);
 
-      // If you are implementing a project that use `ring-client-api`, you should subscribe to onRefreshTokenUpdated and update your config each time it fires an event
-      // Here is an example using a .env file for configuration
-      if (!oldRefreshToken) {
-        return;
-      }
+  //     // If you are implementing a project that use `ring-client-api`, you should subscribe to onRefreshTokenUpdated and update your config each time it fires an event
+  //     // Here is an example using a .env file for configuration
+  //     if (!oldRefreshToken) {
+  //       return;
+  //     }
 
-      const currentConfig = await promisify(readFile)(".env"),
-        updatedConfig = currentConfig
-          .toString()
-          .replace(oldRefreshToken, newRefreshToken);
+  //     const currentConfig = await promisify(readFile)(".env"),
+  //       updatedConfig = currentConfig
+  //         .toString()
+  //         .replace(oldRefreshToken, newRefreshToken);
 
-      await promisify(writeFile)(".env", updatedConfig);
-    }
-  );
+  //     await promisify(writeFile)(".env", updatedConfig);
+  //   }
+  // );
 
   for (const location of locations) {
     let haveConnected = false;
@@ -50,47 +72,32 @@ async function example() {
     });
   }
 
-  for (const location of locations) {
-    const cameras = location.cameras,
-      devices = await location.getDevices();
+  // for (const location of locations) {
+  //   const cameras = location.cameras,
+  //     devices = await location.getDevices();
 
-    console.log(
-      `\nLocation ${location.name} (${location.id}) has the following ${cameras.length} camera(s):`
-    );
+  //   console.log(
+  //     `\nLocation ${location.name} (${location.id}) has the following ${cameras.length} camera(s):`
+  //   );
 
-    for (const camera of cameras) {
-      console.log(`- ${camera.id}: ${camera.name} (${camera.deviceType})`);
-    }
+  //   console.log(
+  //     `\nLocation ${location.name} (${location.id}) has the following ${devices.length} device(s):`
+  //   );
 
-    console.log(
-      `\nLocation ${location.name} (${location.id}) has the following ${devices.length} device(s):`
-    );
-
-    for (const device of devices) {
-      console.log(`- ${device.zid}: ${device.name} (${device.deviceType})`);
-    }
-  }
+  //   for (const device of devices) {
+  //     console.log(`- ${device.zid}: ${device.name} (${device.deviceType})`);
+  //   }
+  // }
 
   if (allCameras.length) {
     allCameras.forEach((camera) => {
-      camera.onNewNotification.subscribe(({ ding, subtype }) => {
-        const event =
-          ding.detection_type === "motion"
-            ? "Motion detected"
-            : subtype === "ding"
-            ? "Doorbell pressed"
-            : `Video started (${subtype})`;
-
-        console.log(
-          `${event} on ${camera.name} camera. Ding id ${
-            ding.id
-          }.  Received at ${new Date()}`
-        );
-      });
-    });
-
-    console.log("Listening for motion and doorbell presses on your cameras.");
+      console.log(`${camera.name} has battery level ${camera.batteryLevel}.`);
+    })
   }
+  
+  await sub.unsubscribe();
+  process.exit(0);
 }
 
 example();
+
