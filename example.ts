@@ -11,23 +11,17 @@ async function getRing() {
         });
 
   const sub = ringApi.onRefreshTokenUpdated.subscribe(
-    async ({newRefreshToken, oldRefreshToken}) => {
+    async ({ newRefreshToken, oldRefreshToken }) => {
       console.log('Token refreshed!');
-
-      if (!oldRefreshToken) { return; }
-
+      if (!oldRefreshToken) { return; }   // TODO: Get another auth token!
       const currentConfig = await promisify(readFile)('.env'),
             updatedConfig = currentConfig
               .toString()
               .replace(oldRefreshToken, newRefreshToken);
-      
       await promisify(writeFile)('.env', updatedConfig)
     }
   )
-  
-
   return { ringApi, sub };
-
 }
 
 async function example() {
@@ -35,66 +29,43 @@ async function example() {
                locations = await ringApi.getLocations(),
               allCameras = await ringApi.getCameras();
 
-  console.log(
-    `Found ${locations.length} location(s) with ${allCameras.length} camera(s).`
-  );
-
-  // ringApi.onRefreshTokenUpdated.subscribe(
-  //   async ({ newRefreshToken, oldRefreshToken }) => {
-  //     console.log("Refresh Token Updated: ", newRefreshToken);
-
-  //     // If you are implementing a project that use `ring-client-api`, you should subscribe to onRefreshTokenUpdated and update your config each time it fires an event
-  //     // Here is an example using a .env file for configuration
-  //     if (!oldRefreshToken) {
-  //       return;
-  //     }
-
-  //     const currentConfig = await promisify(readFile)(".env"),
-  //       updatedConfig = currentConfig
-  //         .toString()
-  //         .replace(oldRefreshToken, newRefreshToken);
-
-  //     await promisify(writeFile)(".env", updatedConfig);
-  //   }
-  // );
-
-  for (const location of locations) {
-    let haveConnected = false;
-    location.onConnected.subscribe((connected) => {
-      if (!haveConnected && !connected) {
-        return;
-      } else if (connected) {
-        haveConnected = true;
-      }
-
-      const status = connected ? "Connected to" : "Disconnected from";
-      console.log(`**** ${status} location ${location.name} - ${location.id}`);
-    });
-  }
-
-  // for (const location of locations) {
-  //   const cameras = location.cameras,
-  //     devices = await location.getDevices();
-
-  //   console.log(
-  //     `\nLocation ${location.name} (${location.id}) has the following ${cameras.length} camera(s):`
-  //   );
-
-  //   console.log(
-  //     `\nLocation ${location.name} (${location.id}) has the following ${devices.length} device(s):`
-  //   );
-
-  //   for (const device of devices) {
-  //     console.log(`- ${device.zid}: ${device.name} (${device.deviceType})`);
-  //   }
-  // }
-
   if (allCameras.length) {
     allCameras.forEach((camera) => {
       console.log(`${camera.name} has battery level ${camera.batteryLevel}.`);
     })
   }
   
+  function takeTime(timeval: number): string {
+    // gets the time string and constructs a string like 'YYYYMMDD_HHmmss'
+    const t = new Date(timeval),
+      d2 = '2-digit',
+      DT_Opts: Intl.DateTimeFormatOptions = { 
+        year: "numeric", month: d2, day: d2,
+        hour: d2, minute: d2, second: d2      
+    }
+    const timeFormatter = Intl.DateTimeFormat('en-US', DT_Opts);
+    const timeFields: Intl.DateTimeFormatPart[] = timeFormatter.formatToParts(t);
+    const { year, month, day, hour, minute, second } = timeFields.reduce(
+      (obj, {type, value}) => {
+        if (type != 'literal') {
+          Object.defineProperty(obj, type, { value: value });
+        }
+        return obj;
+      },{}
+    ) as any;  // shut up, ts!
+    return `${year+month+day}_${hour+minute+second}`;  //  concatenation, NOT addition!
+  }
+  
+  // let's try to get a snapshot...
+  const fluffyCam = allCameras.find( cam => cam.name == '@Fluffy');
+  if ( fluffyCam ) {
+    fluffyCam.requestUpdate();
+    const snap = await fluffyCam.getSnapshot(),
+      snapAge = fluffyCam.currentTimestampAge;
+    console.log(`\nSnap taken ${snapAge / 1000} seconds ago.\n`,fluffyCam.data);
+    await promisify(writeFile)(`${takeTime(Date.now() - 1000 * snapAge)}snap.jpg`, snap);
+  }
+
   await sub.unsubscribe();
   process.exit(0);
 }
